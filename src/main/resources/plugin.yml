@@ -1,0 +1,4 @@
+name: RayTraceGen
+version: '${version}'
+main: comfortable_andy.ray_trace_gen.RayTraceGenMain
+api-version: '1.21'

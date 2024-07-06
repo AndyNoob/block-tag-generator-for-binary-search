@@ -1,12 +1,20 @@
 package comfortable_andy.ray_trace_gen;
 
+import com.destroystokyo.paper.MaterialSetTag;
 import com.destroystokyo.paper.MaterialTags;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.mojang.datafixers.util.Pair;
+import net.minecraft.server.MinecraftServer;
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.Registry;
+import org.bukkit.Tag;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.craftbukkit.block.CraftBlockState;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.util.BoundingBox;
+import org.bukkit.util.VoxelShape;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -18,13 +26,35 @@ import java.util.List;
 public final class RayTraceGenMain extends JavaPlugin {
 
     private final Gson gson = new GsonBuilder().setLenient().setPrettyPrinting().disableHtmlEscaping().create();
+    private final List<Tag<Material>> tags = List.of(Tag.STAIRS, Tag.SLABS, Tag.CANDLES, Tag.WALLS, Tag.ALL_SIGNS, Tag.ITEMS_SKULLS, Tag.ALL_HANGING_SIGNS, Tag.WOOL_CARPETS, Tag.DOORS, Tag.TRAPDOORS);
 
     @Override
     public void onEnable() {
         final long count = Arrays.stream(Material.values()).filter(Material::isBlock).count();
+        final World world = Bukkit.getWorld(MinecraftServer.getServer().server.getHandle().getServer().getProperties().levelName);
         getLogger().info("Block #: " + count);
-        generate("non_full", Arrays.stream(Material.values()).filter(m -> m.isBlock() && m.isCollidable() && !m.isOccluding()).toList());
+
+        final List<Material> nonFull = Arrays.stream(Material.values()).filter(Material::isBlock).filter(m -> {
+            Block block = world.getBlockAt(0, world.getMaxHeight() - 1, 0);
+            block.setType(m);
+            return !isCube(block);
+        }).toList();
+        getLogger().info("Non full #: " + nonFull.size());
+
+
+        generate("non_full", nonFull);
         generate("glass_panes", Arrays.stream(Material.values()).filter(m -> MaterialTags.GLASS_PANES.isTagged(m) && MaterialTags.STAINED_GLASS_PANES.isTagged(m)).toList());
+    }
+
+    private boolean isCube(Block block) {
+        // from https://www.spigotmc.org/threads/how-to-check-if-a-block-is-realy-a-block.536470/#post-4314270
+        VoxelShape voxelShape = block.getCollisionShape();
+        BoundingBox boundingBox = block.getBoundingBox();
+        return (voxelShape.getBoundingBoxes().size() == 1
+                && boundingBox.getWidthX() == 1.0
+                && boundingBox.getHeight() == 1.0
+                && boundingBox.getWidthZ() == 1.0
+        );
     }
 
     private void generate(String name, List<Material> mats) {
@@ -83,9 +113,9 @@ public final class RayTraceGenMain extends JavaPlugin {
     }
 
     public static class BlockTag {
-        private final List<String> blocks;
+        private final List<String> values;
         public BlockTag(List<Material> mats) {
-            this.blocks = mats.stream().map(m -> m.asBlockType().key().asString()).toList();
+            this.values = mats.stream().map(m -> m.asBlockType().key().asString()).toList();
         }
     }
 

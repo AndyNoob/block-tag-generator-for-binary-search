@@ -1,3 +1,5 @@
+import java.util.stream.Stream
+
 plugins {
     id 'java'
     id 'me.kcra.takenaka.accessor' version '1.1.4'
@@ -24,14 +26,18 @@ repositories {
 
 dependencies {
     implementation 'com.google.code.gson:gson:2.11.0'
+    implementation 'commons-cli:commons-cli:1.8.0'
     mappingBundle("me.kcra.takenaka:mappings:1.8.8+1.20.6")
     implementation("me.kcra.takenaka:generator-accessor-runtime:${me.kcra.takenaka.gradle.BuildConfig.BUILD_VERSION}")
 }
 
 accessors {
-    basePackage("comfortable_andy.ray_trace_gen.accessors") // this is the base package of the generated output, probably somewhere in your plugin/library's namespace
-    accessedNamespaces("spigot", "mojang") // these are the "namespaces" that can be queried on runtime, i.e. "spigot" (for Spigot/CraftBukkit/Paper), "searge" (for Forge), "mojang" (for Mojang-mapped Paper - >1.20.4), "yarn" (not useful on runtime) or "intermediary" (for Fabric)
-    accessorType("reflection") // this is the generated accessor type, can be "none" (no accessor breakout classes are generated, only a mapping class that can be queried), "reflection" or "method_handles" (self-explanatory, java.lang.reflect or java.lang.invoke accessors)
+    basePackage("comfortable_andy.ray_trace_gen.accessors")
+    // this is the base package of the generated output, probably somewhere in your plugin/library's namespace
+    accessedNamespaces("spigot", "mojang")
+    // these are the "namespaces" that can be queried on runtime, i.e. "spigot" (for Spigot/CraftBukkit/Paper), "searge" (for Forge), "mojang" (for Mojang-mapped Paper - >1.20.4), "yarn" (not useful on runtime) or "intermediary" (for Fabric)
+    accessorType("reflection")
+    // this is the generated accessor type, can be "none" (no accessor breakout classes are generated, only a mapping class that can be queried), "reflection" or "method_handles" (self-explanatory, java.lang.reflect or java.lang.invoke accessors)
     mapClass("net.minecraft.world.level.block.Block") {
         method(boolean.class, "isShapeFullBlock", "net.minecraft.world.phys.shapes.VoxelShape")
         method("net.minecraft.world.phys.shapes.VoxelShape", "getCollisionShape", "net.minecraft.world.level.block.state.BlockState", "net.minecraft.world.level.BlockGetter", "net.minecraft.core.BlockPos", "net.minecraft.world.phys.shapes.CollisionContext")
@@ -45,14 +51,17 @@ accessors {
     mapClass("net.minecraft.world.phys.shapes.CollisionContext") {
         method("net.minecraft.world.phys.shapes.CollisionContext", "empty")
     }
-    mapClass("net.minecraft.core.Registry") {
-        method(Set.class, "entrySet")
-    }
     mapClass("net.minecraft.core.registries.BuiltInRegistries") {
         field("net.minecraft.core.DefaultedRegistry", "BLOCK")
     }
     mapClass("net.minecraft.client.main.Main") {
         method(Void.TYPE, "main", String[].class)
+    }
+}
+
+jar {
+    manifest {
+        attributes('Main-Class': 'comfortable_andy.ray_trace_gen.RayTraceGenMain')
     }
 }
 
@@ -81,4 +90,8 @@ processResources {
     filesMatching('plugin.yml') {
         expand props
     }
+}
+
+shadowJar {
+    archiveClassifier.set("")
 }

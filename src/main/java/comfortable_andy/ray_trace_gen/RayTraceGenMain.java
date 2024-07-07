@@ -3,17 +3,23 @@ package comfortable_andy.ray_trace_gen;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.Strictness;
-import comfortable_andy.ray_trace_gen.accessors.MainAccessor;
 import me.kcra.takenaka.accessor.platform.MapperPlatform;
 import me.kcra.takenaka.accessor.platform.MapperPlatforms;
 import org.apache.commons.cli.*;
+import org.jsoup.Connection;
+import org.jsoup.Jsoup;
 
 import java.io.*;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 public final class RayTraceGenMain {
 
@@ -34,14 +40,53 @@ public final class RayTraceGenMain {
                 new Options().addOption(minecraftVer),
                 args
         );
-        final File file = new File(cl.getOptionValue(minecraftLoc));
-        try (URLClassLoader loader = new URLClassLoader(new URL[]{file.toURI().toURL()})) {
+        VersionManifest manifest = GSON.fromJson(Jsoup.connect("https://launchermeta.mojang.com/mc/game/version_manifest.json").ignoreContentType(true).get().body().text(), VersionManifest.class);
+        VersionManifest.Version version = manifest.getVersion(cl.getOptionValue(minecraftVer));
+        VersionData data = GSON.fromJson(Jsoup.connect(version.url()).ignoreContentType(true).get().body().text(), VersionData.class);
+
+        final Path folder = Files
+                .createTempDirectory(UUID.randomUUID() + "-" + new Date());
+        final List<URL> urls = new ArrayList<>();
+
+        System.out.println("Downloading server... (" + data.downloads().client().url() + ")");
+        URL url = downloadFile(folder, "server.jar", data.downloads().server().url()).toUri().toURL();
+
+        System.out.println("Done: " + url);
+
+        urls.add(url);
+
+        try (URLClassLoader loader = new URLClassLoader(urls.toArray(URL[]::new))) {
+            System.setProperty("user.dir", folder.toString());
+
+            System.out.println(Paths.get("").toAbsolutePath());
+            try (FileWriter writer = new FileWriter(new File(folder.toFile(), "eula.txt"))) {
+                writer.write("eula=true\n");
+            }
+            MapperPlatforms.setCurrentPlatform(
+                    MapperPlatform.create(cl.getOptionValue(minecraftVer), loader, "source")
+            );
+            loader.loadClass("net.minecraft.bundler.Main").getDeclaredMethod("main", String[].class).invoke(null, (Object) new String[]{"nogui"});
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+
+        System.out.println("Grabbing information...");
     }
 
-    private void generate(String name, List<String> mats) {
+    private static Path downloadFile(Path folder, String name, String url) throws IOException {
+        Path path = folder.resolve(name);
+        File file = path.toFile();
+        file.getParentFile().mkdirs();
+        file.createNewFile();
+        file.deleteOnExit();
+        Connection.Response response = Jsoup.connect(url).ignoreContentType(true).userAgent("block-tag-generator").execute();
+        try (BufferedInputStream bufferStream = response.bodyStream(); FileOutputStream fileStream = new FileOutputStream(file)) {
+            bufferStream.transferTo(fileStream);
+        }
+        return path;
+    }
+
+    private static void generate(String name, List<String> mats) {
         final long upper = closestLargerMultipleOfTwo(mats.size());
 
         final File root = new File("tags");

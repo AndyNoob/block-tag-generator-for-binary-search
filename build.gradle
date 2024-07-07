@@ -58,9 +58,6 @@ accessors {
     mapClass("net.minecraft.core.registries.BuiltInRegistries") {
         field("net.minecraft.core.DefaultedRegistry", "BLOCK")
     }
-    mapClass("net.minecraft.client.main.Main") {
-        method(Void.TYPE, "main", String[].class)
-    }
 }
 
 jar {

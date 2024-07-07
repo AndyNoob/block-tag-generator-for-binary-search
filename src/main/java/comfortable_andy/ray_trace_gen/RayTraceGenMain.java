@@ -59,7 +59,6 @@ public final class RayTraceGenMain extends JavaPlugin {
 
     private void generate(String name, List<Material> mats) {
         final long upper = closestLargerMultipleOfTwo(mats.size());
-        getLogger().info("Tag start: " + upper);
 
         final File root = new File(getDataFolder(), "tags");
         root.mkdirs();

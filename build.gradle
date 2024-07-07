@@ -27,19 +27,23 @@ repositories {
 dependencies {
     implementation 'com.google.code.gson:gson:2.11.0'
     implementation 'commons-cli:commons-cli:1.8.0'
-    mappingBundle("me.kcra.takenaka:mappings:1.8.8+1.20.6")
+    implementation 'org.jsoup:jsoup:1.17.2'
+    mappingBundle("me.kcra.takenaka:mappings:1.8.8+1.21")
     implementation("me.kcra.takenaka:generator-accessor-runtime:${me.kcra.takenaka.gradle.BuildConfig.BUILD_VERSION}")
 }
 
 accessors {
     basePackage("comfortable_andy.ray_trace_gen.accessors")
     // this is the base package of the generated output, probably somewhere in your plugin/library's namespace
-    accessedNamespaces("spigot", "mojang")
+    accessedNamespaces("source", "spigot", "mojang")
+    versions("1.21")
     // these are the "namespaces" that can be queried on runtime, i.e. "spigot" (for Spigot/CraftBukkit/Paper), "searge" (for Forge), "mojang" (for Mojang-mapped Paper - >1.20.4), "yarn" (not useful on runtime) or "intermediary" (for Fabric)
     accessorType("reflection")
     // this is the generated accessor type, can be "none" (no accessor breakout classes are generated, only a mapping class that can be queried), "reflection" or "method_handles" (self-explanatory, java.lang.reflect or java.lang.invoke accessors)
     mapClass("net.minecraft.world.level.block.Block") {
         method(boolean.class, "isShapeFullBlock", "net.minecraft.world.phys.shapes.VoxelShape")
+    }
+    mapClass("net.minecraft.world.level.block.state.BlockBehaviour") {
         method("net.minecraft.world.phys.shapes.VoxelShape", "getCollisionShape", "net.minecraft.world.level.block.state.BlockState", "net.minecraft.world.level.BlockGetter", "net.minecraft.core.BlockPos", "net.minecraft.world.phys.shapes.CollisionContext")
     }
     mapClass("net.minecraft.world.level.EmptyBlockGetter") {

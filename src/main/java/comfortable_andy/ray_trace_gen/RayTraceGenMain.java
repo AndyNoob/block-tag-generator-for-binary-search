@@ -3,13 +3,12 @@ package comfortable_andy.ray_trace_gen;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.Strictness;
-import comfortable_andy.ray_trace_gen.accessors.BlockAccessor;
+import comfortable_andy.ray_trace_gen.accessors.MainAccessor;
+import me.kcra.takenaka.accessor.platform.MapperPlatform;
+import me.kcra.takenaka.accessor.platform.MapperPlatforms;
 import org.apache.commons.cli.*;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.net.MalformedURLException;
+import java.io.*;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
@@ -18,21 +17,21 @@ import java.util.List;
 
 public final class RayTraceGenMain {
 
-    private final Gson gson = new GsonBuilder()
+    private static final Gson GSON = new GsonBuilder()
             .setStrictness(Strictness.LENIENT)
             .setPrettyPrinting()
             .disableHtmlEscaping()
             .create();
 
-    public static void main(String[] args) throws ParseException {
-        Option minecraftLoc = Option.builder("m")
-                .longOpt("minecraft")
+    public static void main(String[] args) throws ParseException, ReflectiveOperationException, IOException {
+        Option minecraftVer = Option.builder("v")
+                .longOpt("version")
                 .required()
-                .desc("Minecraft client jar file location")
+                .desc("Minecraft client jar version")
                 .hasArg()
                 .build();
         CommandLine cl = new DefaultParser().parse(
-                new Options().addOption(minecraftLoc),
+                new Options().addOption(minecraftVer),
                 args
         );
         final File file = new File(cl.getOptionValue(minecraftLoc));
@@ -77,8 +76,8 @@ public final class RayTraceGenMain {
                 final List<String> leftList = current.subList(0, Math.min(current.size(), half));
                 final List<String> rightList = current.subList(Math.min(current.size(), half), (int) Math.min(current.size(), val));
                 try (FileWriter left = new FileWriter(leftFile); FileWriter right = new FileWriter(rightFile)) {
-                    left.write(gson.toJson(new BlockTag(leftList)));
-                    right.write(gson.toJson(new BlockTag(rightList)));
+                    left.write(GSON.toJson(new BlockTag(leftList)));
+                    right.write(GSON.toJson(new BlockTag(rightList)));
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -92,7 +91,7 @@ public final class RayTraceGenMain {
         }
     }
 
-    private long closestLargerMultipleOfTwo(long val) {
+    private static long closestLargerMultipleOfTwo(long val) {
         return 2048;
     }
 

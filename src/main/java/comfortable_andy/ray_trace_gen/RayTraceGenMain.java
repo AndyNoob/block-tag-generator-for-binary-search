@@ -12,10 +12,7 @@ import org.jsoup.Jsoup;
 import java.io.*;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -46,19 +43,16 @@ public final class RayTraceGenMain {
 
         final Path folder = Files
                 .createTempDirectory(UUID.randomUUID() + "-" + new Date());
-        final List<URL> urls = new ArrayList<>();
 
         System.out.println("Downloading server... (" + data.downloads().client().url() + ")");
         URL url = downloadFile(folder, "server.jar", data.downloads().server().url()).toUri().toURL();
 
         System.out.println("Done: " + url);
 
-        urls.add(url);
+        WatchService service = FileSystems.getDefault().newWatchService();
+        Paths.get("").toAbsolutePath().register(service, StandardWatchEventKinds.ENTRY_CREATE);
 
-        try (URLClassLoader loader = new URLClassLoader(urls.toArray(URL[]::new))) {
-            System.setProperty("user.dir", folder.toString());
-
-            System.out.println(Paths.get("").toAbsolutePath());
+        try (URLClassLoader loader = new URLClassLoader(new URL[]{url})) {
             try (FileWriter writer = new FileWriter(new File(folder.toFile(), "eula.txt"))) {
                 writer.write("eula=true\n");
             }
@@ -71,6 +65,12 @@ public final class RayTraceGenMain {
         }
 
         System.out.println("Grabbing information...");
+        for (WatchEvent<?> event : service.poll().pollEvents()) {
+            Object context = event.context();
+            System.out.println(context.getClass());
+            System.out.println(context);
+        }
+        service.close();
     }
 
     private static Path downloadFile(Path folder, String name, String url) throws IOException {

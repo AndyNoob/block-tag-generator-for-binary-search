@@ -1,5 +1,3 @@
-import java.util.stream.Stream
-
 plugins {
     id 'java'
     id 'me.kcra.takenaka.accessor' version '1.1.4'
@@ -42,6 +40,7 @@ accessors {
     // this is the generated accessor type, can be "none" (no accessor breakout classes are generated, only a mapping class that can be queried), "reflection" or "method_handles" (self-explanatory, java.lang.reflect or java.lang.invoke accessors)
     mapClass("net.minecraft.world.level.block.Block") {
         method(boolean.class, "isShapeFullBlock", "net.minecraft.world.phys.shapes.VoxelShape")
+        method("net.minecraft.world.level.block.state.BlockState", "defaultBlockState")
     }
     mapClass("net.minecraft.world.level.block.state.BlockBehaviour") {
         method("net.minecraft.world.phys.shapes.VoxelShape", "getCollisionShape", "net.minecraft.world.level.block.state.BlockState", "net.minecraft.world.level.BlockGetter", "net.minecraft.core.BlockPos", "net.minecraft.world.phys.shapes.CollisionContext")

@@ -3,6 +3,7 @@ package comfortable_andy.ray_trace_gen;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.Strictness;
+import comfortable_andy.ray_trace_gen.accessors.*;
 import me.kcra.takenaka.accessor.platform.MapperPlatform;
 import me.kcra.takenaka.accessor.platform.MapperPlatforms;
 import org.apache.commons.cli.*;
@@ -10,13 +11,16 @@ import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 
 import java.io.*;
+import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 public final class RayTraceGenMain {
 
@@ -26,7 +30,7 @@ public final class RayTraceGenMain {
             .disableHtmlEscaping()
             .create();
 
-    public static void main(String[] args) throws ParseException, ReflectiveOperationException, IOException {
+    public static void main(String[] args) throws ParseException, ReflectiveOperationException, IOException, InterruptedException {
         Option minecraftVer = Option.builder("v")
                 .longOpt("version")
                 .required()
@@ -49,28 +53,113 @@ public final class RayTraceGenMain {
 
         System.out.println("Done: " + url);
 
-        WatchService service = FileSystems.getDefault().newWatchService();
-        Paths.get("").toAbsolutePath().register(service, StandardWatchEventKinds.ENTRY_CREATE);
+        final List<File> delete = new ArrayList<>();
 
-        try (URLClassLoader loader = new URLClassLoader(new URL[]{url})) {
-            try (FileWriter writer = new FileWriter(new File(folder.toFile(), "eula.txt"))) {
-                writer.write("eula=true\n");
+        try (WatchService service = FileSystems.getDefault().newWatchService()) {
+            File eula = new File("eula.txt");
+            try (FileWriter writer = new FileWriter(eula)) {
+                writer.write("eula=true");
             }
-            MapperPlatforms.setCurrentPlatform(
-                    MapperPlatform.create(cl.getOptionValue(minecraftVer), loader, "source")
-            );
-            loader.loadClass("net.minecraft.bundler.Main").getDeclaredMethod("main", String[].class).invoke(null, (Object) new String[]{"nogui"});
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+            eula.deleteOnExit();
+            Paths.get("").register(service, StandardWatchEventKinds.ENTRY_CREATE);
+            try (URLClassLoader loader = new URLClassLoader(new URL[]{url})) {
+                try (FileWriter writer = new FileWriter(new File(folder.toFile(), "eula.txt"))) {
+                    writer.write("eula=true\n");
+                }
+                MapperPlatforms.setCurrentPlatform(
+                        MapperPlatform.create(
+                                cl.getOptionValue(minecraftVer),
+                                loader,
+                                "spigot"
+                        )
+                );
+                loader.loadClass("net.minecraft.bundler.Main").getDeclaredMethod("main", String[].class).invoke(null, (Object) new String[]{"nogui"});
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
 
-        System.out.println("Grabbing information...");
-        for (WatchEvent<?> event : service.poll().pollEvents()) {
-            Object context = event.context();
-            System.out.println(context.getClass());
-            System.out.println(context);
+            WatchKey key;
+            while ((key = service.poll(5, TimeUnit.SECONDS)) != null) {
+                for (WatchEvent<?> event : key.pollEvents()) {
+                    String created = String.valueOf(event.context());
+                    delete.add(new File(created));
+                    System.out.println("Marked " + created + " for deletion.");
+                }
+                key.reset();
+            }
+            System.out.println("Grabbing information...");
+
+            int fullCounter = 0;
+            int nonFullCounter = 0;
+
+            Object blockRegistry = BuiltInRegistriesAccessor.FIELD_BLOCK.get();
+
+            if (blockRegistry == null) {
+                System.out.println("Could not find block registry, exiting...");
+                return;
+            }
+
+            for (Object o : ((Iterable<?>) blockRegistry)) {
+                Class<?> blockClass = BlockAccessor.TYPE.get();
+                if (!blockClass.isAssignableFrom(o.getClass()))
+                    throw new IllegalStateException("Values in the BLOCK registry isn't of type Block?");
+                Object blockState = BlockAccessor.METHOD_DEFAULT_BLOCK_STATE.get().invoke(o);
+                Object emptyGetter = EmptyBlockGetterAccessor.FIELD_INSTANCE.get();
+                Object blockPosZero = BlockPosAccessor.FIELD_ZERO.get();
+                Object emptyCollisionContext = CollisionContextAccessor.METHOD_EMPTY.get().invoke(null);
+                Method getShape = BlockBehaviourAccessor.METHOD_GET_COLLISION_SHAPE.get();
+                Object shape = getShape.invoke(
+                        o,
+                        blockState,
+                        emptyGetter,
+                        blockPosZero,
+                        emptyCollisionContext
+                );
+                if ((boolean) BlockAccessor.METHOD_IS_SHAPE_FULL_BLOCK.get().invoke(null, shape)) fullCounter++;
+                else nonFullCounter++;
+            }
+            System.out.println("Found " + fullCounter + " full blocks");
+            System.out.println("Found " + nonFullCounter + " non full blocks");
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } finally {
+            System.out.println("Closing server...");
+            ByteArrayInputStream inputStream =
+                    new ByteArrayInputStream("stop".getBytes(StandardCharsets.UTF_8));
+            InputStream in = System.in;
+
+            // finally executes after closing
+            //noinspection TryFinallyCanBeTryWithResources
+            try {
+                System.out.println("Hijacking input stream...");
+                System.setIn(inputStream);
+            } finally {
+                System.setIn(in);
+                System.out.println("Done.");
+                inputStream.close();
+            }
+
+            PrintStream out = System.out;
+            final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            final PrintStream newOut = new PrintStream(outputStream);
+            System.setOut(newOut);
+            do {
+                out.println("Waiting 5 seconds for new logs...");
+                Thread.sleep(5000);
+            } while (!outputStream.toString().isEmpty());
+            System.setOut(out);
+
+            System.out.println("Server (should be) down.");
+            System.out.println("Doing cleanups...");
+            for (File file : delete) {
+                System.out.println("Deleting " + file.toPath());
+                if (file.isDirectory()) {
+                    Files.walk(file.toPath()).forEach(p -> p.toFile().delete());
+                    file.delete();
+                }
+                else file.delete();
+            }
         }
-        service.close();
     }
 
     private static Path downloadFile(Path folder, String name, String url) throws IOException {

@@ -30,6 +30,7 @@ public final class RayTraceGenMain {
             .disableHtmlEscaping()
             .create();
 
+    @SuppressWarnings("ResultOfMethodCallIgnored")
     public static void main(String[] args) throws ParseException, ReflectiveOperationException, IOException, InterruptedException {
         Option minecraftVer = Option.builder("v")
                 .longOpt("version")
@@ -125,7 +126,7 @@ public final class RayTraceGenMain {
         } finally {
             System.out.println("Closing server...");
             ByteArrayInputStream inputStream =
-                    new ByteArrayInputStream("stop".getBytes(StandardCharsets.UTF_8));
+                    new ByteArrayInputStream("/stop\r".getBytes(StandardCharsets.UTF_8));
             InputStream in = System.in;
 
             // finally executes after closing
@@ -147,6 +148,8 @@ public final class RayTraceGenMain {
                 out.println("Waiting 5 seconds for new logs...");
                 Thread.sleep(5000);
             } while (!outputStream.toString().isEmpty());
+            outputStream.close();
+            newOut.close();
             System.setOut(out);
 
             System.out.println("Server (should be) down.");
@@ -162,6 +165,7 @@ public final class RayTraceGenMain {
         }
     }
 
+    @SuppressWarnings("ResultOfMethodCallIgnored")
     private static Path downloadFile(Path folder, String name, String url) throws IOException {
         Path path = folder.resolve(name);
         File file = path.toFile();

@@ -16,11 +16,9 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public final class RayTraceGenMain {
 
@@ -34,22 +32,34 @@ public final class RayTraceGenMain {
     public static void main(String[] args) throws ParseException, ReflectiveOperationException, IOException, InterruptedException {
         Option minecraftVer = Option.builder("v")
                 .longOpt("version")
-                .required()
                 .desc("Minecraft client jar version")
                 .hasArg()
                 .build();
+        Option files = Option.builder("f")
+                .longOpt("files")
+                .desc("Block tag json files")
+                .hasArg()
+                .build();
         CommandLine cl = new DefaultParser().parse(
-                new Options().addOption(minecraftVer),
+                new Options().addOption(minecraftVer).addOption(files),
                 args
         );
         VersionManifest manifest = GSON.fromJson(Jsoup.connect("https://launchermeta.mojang.com/mc/game/version_manifest.json").ignoreContentType(true).get().body().text(), VersionManifest.class);
-        VersionManifest.Version version = manifest.getVersion(cl.getOptionValue(minecraftVer));
+        String minecraftVersion = cl.getOptionValue(minecraftVer);
+        if (minecraftVersion != null) runServer(manifest, minecraftVersion);
+        else {
+            generate(Arrays.stream(Objects.requireNonNull(Paths.get("").toAbsolutePath().toFile().listFiles(f -> !f.isDirectory() && f.getName().split("\\.")[1].equals("json")))).collect(Collectors.toList()));
+        }
+    }
+
+    private static void runServer(VersionManifest manifest, String minecraftVersion) throws IOException, ReflectiveOperationException, InterruptedException {
+        VersionManifest.Version version = manifest.getVersion(minecraftVersion);
         VersionData data = GSON.fromJson(Jsoup.connect(version.url()).ignoreContentType(true).get().body().text(), VersionData.class);
 
         final Path folder = Files
                 .createTempDirectory(UUID.randomUUID() + "-" + new Date());
 
-        System.out.println("Downloading server... (" + data.downloads().client().url() + ")");
+        System.out.println("Downloading server... (" + data.downloads().server().url() + ")");
         URL url = downloadFile(folder, "server.jar", data.downloads().server().url()).toUri().toURL();
 
         System.out.println("Done: " + url);
@@ -69,7 +79,7 @@ public final class RayTraceGenMain {
                 }
                 MapperPlatforms.setCurrentPlatform(
                         MapperPlatform.create(
-                                cl.getOptionValue(minecraftVer),
+                                minecraftVersion,
                                 loader,
                                 "spigot"
                         )
@@ -179,45 +189,40 @@ public final class RayTraceGenMain {
         return path;
     }
 
-    private static void generate(String name, List<String> mats) {
-        final long upper = closestLargerMultipleOfTwo(mats.size());
+    private static void generate(List<File> files) throws IOException {
+        final long upper = closestLargerMultipleOfTwo(files.size());
 
         final File root = new File("tags");
-        root.mkdirs();
-        final String fileName = name + ".json";
 
-        final List<Pair<List<String>, File>> toWriteTo = new ArrayList<>();
-        toWriteTo.add(Pair.of(mats, root));
+        final List<Pair<List<File>, File>> toWriteTo = new ArrayList<>();
+        toWriteTo.add(Pair.of(files, root));
+
+        root.mkdirs();
+
+        for (File file : files) {
+            Files.copy(file.toPath(), root.toPath().resolve(file.getName()));
+        }
 
         long val = upper;
         while (val > 1) {
             final int half = (int) (val / 2);
-            final List<Pair<List<String>, File>> toAdd = new ArrayList<>();
+            final List<Pair<List<File>, File>> toAdd = new ArrayList<>();
 
-            for (Pair<List<String>, File> pair : toWriteTo) {
-                final List<String> current = pair.first();
+            for (Pair<List<File>, File> pair : toWriteTo) {
+                final List<File> current = pair.first();
                 final File parent = pair.second();
+                parent.mkdirs();
                 final File leftFolder = new File(parent, val + "l/");
                 final File rightFolder = new File(parent, val + "r/");
                 leftFolder.mkdirs();
                 rightFolder.mkdirs();
-                final File leftFile = new File(leftFolder, fileName);
-                final File rightFile = new File(rightFolder, fileName);
-                leftFile.delete();
-                rightFile.delete();
-                try {
-                    leftFile.createNewFile();
-                    rightFile.createNewFile();
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+                final List<File> leftList = current.subList(0, Math.min(current.size(), half));
+                final List<File> rightList = current.subList(Math.min(current.size(), half), (int) Math.min(current.size(), val));
+                for (File file : leftList) {
+                    Files.copy(file.toPath(), leftFolder.toPath().resolve(file.getName()));
                 }
-                final List<String> leftList = current.subList(0, Math.min(current.size(), half));
-                final List<String> rightList = current.subList(Math.min(current.size(), half), (int) Math.min(current.size(), val));
-                try (FileWriter left = new FileWriter(leftFile); FileWriter right = new FileWriter(rightFile)) {
-                    left.write(GSON.toJson(new BlockTag(leftList)));
-                    right.write(GSON.toJson(new BlockTag(rightList)));
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+                for (File file : rightList) {
+                    Files.copy(file.toPath(), rightFolder.toPath().resolve(file.getName()));
                 }
                 toAdd.add(Pair.of(leftList, leftFolder));
                 toAdd.add(Pair.of(rightList, rightFolder));
@@ -230,7 +235,11 @@ public final class RayTraceGenMain {
     }
 
     private static long closestLargerMultipleOfTwo(long val) {
-        return 2048;
+        int multiple = 1;
+        while (multiple < val) {
+            multiple *= 2;
+        }
+        return multiple;
     }
 
     public static record BlockTag(List<String> values) {

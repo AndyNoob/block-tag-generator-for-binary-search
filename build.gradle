@@ -1,3 +1,5 @@
+import me.kcra.takenaka.gradle.BuildConfig
+
 plugins {
     id 'java'
     id 'me.kcra.takenaka.accessor' version '1.1.4'
@@ -26,8 +28,8 @@ dependencies {
     implementation 'com.google.code.gson:gson:2.11.0'
     implementation 'commons-cli:commons-cli:1.8.0'
     implementation 'org.jsoup:jsoup:1.17.2'
-    mappingBundle("me.kcra.takenaka:mappings:1.8.8+1.21")
-    implementation("me.kcra.takenaka:generator-accessor-runtime:${me.kcra.takenaka.gradle.BuildConfig.BUILD_VERSION}")
+    mappingBundle('me.kcra.takenaka:mappings:1.8.8+1.21')
+    implementation('me.kcra.takenaka:generator-accessor-runtime:' + BuildConfig.BUILD_VERSION)
 }
 
 accessors {

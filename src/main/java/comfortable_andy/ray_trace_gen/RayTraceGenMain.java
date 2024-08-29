@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 public final class RayTraceGenMain {
@@ -48,7 +49,13 @@ public final class RayTraceGenMain {
         String minecraftVersion = cl.getOptionValue(minecraftVer);
         if (minecraftVersion != null) runServer(manifest, minecraftVersion);
         else {
-            generate(Arrays.stream(Objects.requireNonNull(Paths.get("").toAbsolutePath().toFile().listFiles(f -> !f.isDirectory() && f.getName().split("\\.")[1].equals("json")))).collect(Collectors.toList()));
+            generate(Arrays.stream(Objects.requireNonNull(Paths.get("").toAbsolutePath().toFile().listFiles(f -> !f.isDirectory() && f.getName().split("\\.")[1].equals("json")))).collect(Collectors.toList()), (root, file) -> {
+                try {
+                    Files.copy(file.toPath(), root.toPath().resolve(file.getName()));
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
         }
     }
 
@@ -65,15 +72,14 @@ public final class RayTraceGenMain {
         System.out.println("Done: " + url);
 
         final List<File> delete = new ArrayList<>();
-
-        try (WatchService service = FileSystems.getDefault().newWatchService()) {
-            File eula = new File("eula.txt");
-            try (FileWriter writer = new FileWriter(eula)) {
-                writer.write("eula=true");
-            }
-            eula.deleteOnExit();
-            Paths.get("").register(service, StandardWatchEventKinds.ENTRY_CREATE);
-            try (URLClassLoader loader = new URLClassLoader(new URL[]{url})) {
+        try (URLClassLoader loader = new URLClassLoader(new URL[]{url})) {
+            try (WatchService service = FileSystems.getDefault().newWatchService()) {
+                File eula = new File("eula.txt");
+                try (FileWriter writer = new FileWriter(eula)) {
+                    writer.write("eula=true");
+                }
+                eula.deleteOnExit();
+                Paths.get("").register(service, StandardWatchEventKinds.ENTRY_CREATE);
                 try (FileWriter writer = new FileWriter(new File(folder.toFile(), "eula.txt"))) {
                     writer.write("eula=true\n");
                 }
@@ -81,97 +87,97 @@ public final class RayTraceGenMain {
                         MapperPlatform.create(
                                 minecraftVersion,
                                 loader,
-                                "spigot"
+                                "source"
                         )
                 );
                 loader.loadClass("net.minecraft.bundler.Main").getDeclaredMethod("main", String[].class).invoke(null, (Object) new String[]{"nogui"});
-            } catch (IOException e) {
+
+                WatchKey key;
+                while ((key = service.poll(5, TimeUnit.SECONDS)) != null) {
+                    for (WatchEvent<?> event : key.pollEvents()) {
+                        String created = String.valueOf(event.context());
+                        delete.add(new File(created));
+                        System.out.println("Marked " + created + " for deletion.");
+                    }
+                    key.reset();
+                }
+                System.out.println("Grabbing information...");
+
+                int fullCounter = 0;
+                int nonFullCounter = 0;
+
+                System.out.println(BuiltInRegistriesAccessor.TYPE.get());
+                Object blockRegistry = BuiltInRegistriesAccessor.FIELD_BLOCK.get();
+
+                if (blockRegistry == null) {
+                    System.out.println("Could not find block registry, exiting...");
+                    return;
+                }
+
+                for (Object o : ((Iterable<?>) blockRegistry)) {
+                    Class<?> blockClass = BlockAccessor.TYPE.get();
+                    if (!blockClass.isAssignableFrom(o.getClass()))
+                        throw new IllegalStateException("Values in the BLOCK registry isn't of type Block?");
+                    Object blockState = BlockAccessor.METHOD_DEFAULT_BLOCK_STATE.get().invoke(o);
+                    Object emptyGetter = EmptyBlockGetterAccessor.FIELD_INSTANCE.get();
+                    Object blockPosZero = BlockPosAccessor.FIELD_ZERO.get();
+                    Object emptyCollisionContext = CollisionContextAccessor.METHOD_EMPTY.get().invoke(null);
+                    Method getShape = BlockBehaviourAccessor.METHOD_GET_COLLISION_SHAPE.get();
+                    Object shape = getShape.invoke(
+                            o,
+                            blockState,
+                            emptyGetter,
+                            blockPosZero,
+                            emptyCollisionContext
+                    );
+                    if ((boolean) BlockAccessor.METHOD_IS_SHAPE_FULL_BLOCK.get().invoke(null, shape)) fullCounter++;
+                    else nonFullCounter++;
+                }
+                System.out.println("Found " + fullCounter + " full blocks");
+                System.out.println("Found " + nonFullCounter + " non full blocks");
+            } catch (InterruptedException e) {
                 throw new RuntimeException(e);
-            }
-
-            WatchKey key;
-            while ((key = service.poll(5, TimeUnit.SECONDS)) != null) {
-                for (WatchEvent<?> event : key.pollEvents()) {
-                    String created = String.valueOf(event.context());
-                    delete.add(new File(created));
-                    System.out.println("Marked " + created + " for deletion.");
-                }
-                key.reset();
-            }
-            System.out.println("Grabbing information...");
-
-            int fullCounter = 0;
-            int nonFullCounter = 0;
-
-            Object blockRegistry = BuiltInRegistriesAccessor.FIELD_BLOCK.get();
-
-            if (blockRegistry == null) {
-                System.out.println("Could not find block registry, exiting...");
-                return;
-            }
-
-            for (Object o : ((Iterable<?>) blockRegistry)) {
-                Class<?> blockClass = BlockAccessor.TYPE.get();
-                if (!blockClass.isAssignableFrom(o.getClass()))
-                    throw new IllegalStateException("Values in the BLOCK registry isn't of type Block?");
-                Object blockState = BlockAccessor.METHOD_DEFAULT_BLOCK_STATE.get().invoke(o);
-                Object emptyGetter = EmptyBlockGetterAccessor.FIELD_INSTANCE.get();
-                Object blockPosZero = BlockPosAccessor.FIELD_ZERO.get();
-                Object emptyCollisionContext = CollisionContextAccessor.METHOD_EMPTY.get().invoke(null);
-                Method getShape = BlockBehaviourAccessor.METHOD_GET_COLLISION_SHAPE.get();
-                Object shape = getShape.invoke(
-                        o,
-                        blockState,
-                        emptyGetter,
-                        blockPosZero,
-                        emptyCollisionContext
-                );
-                if ((boolean) BlockAccessor.METHOD_IS_SHAPE_FULL_BLOCK.get().invoke(null, shape)) fullCounter++;
-                else nonFullCounter++;
-            }
-            System.out.println("Found " + fullCounter + " full blocks");
-            System.out.println("Found " + nonFullCounter + " non full blocks");
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally {
-            System.out.println("Closing server...");
-            ByteArrayInputStream inputStream =
-                    new ByteArrayInputStream("/stop\r".getBytes(StandardCharsets.UTF_8));
-            InputStream in = System.in;
-
-            // finally executes after closing
-            //noinspection TryFinallyCanBeTryWithResources
-            try {
-                System.out.println("Hijacking input stream...");
-                System.setIn(inputStream);
             } finally {
-                System.setIn(in);
-                System.out.println("Done.");
-                inputStream.close();
-            }
+                System.out.println("Closing server...");
+                ByteArrayInputStream inputStream =
+                        new ByteArrayInputStream("/stop\r".getBytes(StandardCharsets.UTF_8));
+                InputStream in = System.in;
 
-            PrintStream out = System.out;
-            final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-            final PrintStream newOut = new PrintStream(outputStream);
-            System.setOut(newOut);
-            do {
-                out.println("Waiting 5 seconds for new logs...");
-                Thread.sleep(5000);
-            } while (!outputStream.toString().isEmpty());
-            outputStream.close();
-            newOut.close();
-            System.setOut(out);
-
-            System.out.println("Server (should be) down.");
-            System.out.println("Doing cleanups...");
-            for (File file : delete) {
-                System.out.println("Deleting " + file.toPath());
-                if (file.isDirectory()) {
-                    Files.walk(file.toPath()).forEach(p -> p.toFile().delete());
-                    file.delete();
+                // finally executes after closing
+                //noinspection TryFinallyCanBeTryWithResources
+                try {
+                    System.out.println("Hijacking input stream...");
+                    System.setIn(inputStream);
+                } finally {
+                    System.setIn(in);
+                    System.out.println("Done.");
+                    inputStream.close();
                 }
-                else file.delete();
+
+                PrintStream out = System.out;
+                final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                final PrintStream newOut = new PrintStream(outputStream);
+                System.setOut(newOut);
+                do {
+                    out.println("Waiting 5 seconds for new logs...");
+                    Thread.sleep(5000);
+                } while (!outputStream.toString().isEmpty());
+                outputStream.close();
+                newOut.close();
+                System.setOut(out);
+
+                System.out.println("Server (should be) down.");
+                System.out.println("Doing cleanups...");
+                for (File file : delete) {
+                    System.out.println("Deleting " + file.toPath());
+                    if (file.isDirectory()) {
+                        Files.walk(file.toPath()).forEach(p -> p.toFile().delete());
+                        file.delete();
+                    } else file.delete();
+                }
             }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -189,40 +195,40 @@ public final class RayTraceGenMain {
         return path;
     }
 
-    private static void generate(List<File> files) throws IOException {
+    private static <T> void generate(List<T> files, BiConsumer<File, T> saver) throws IOException {
         final long upper = closestLargerMultipleOfTwo(files.size());
 
         final File root = new File("tags");
 
-        final List<Pair<List<File>, File>> toWriteTo = new ArrayList<>();
+        final List<Pair<List<T>, File>> toWriteTo = new ArrayList<>();
         toWriteTo.add(Pair.of(files, root));
 
         root.mkdirs();
 
-        for (File file : files) {
-            Files.copy(file.toPath(), root.toPath().resolve(file.getName()));
+        for (T file : files) {
+            saver.accept(root, file);
         }
 
         long val = upper;
         while (val > 1) {
             final int half = (int) (val / 2);
-            final List<Pair<List<File>, File>> toAdd = new ArrayList<>();
+            final List<Pair<List<T>, File>> toAdd = new ArrayList<>();
 
-            for (Pair<List<File>, File> pair : toWriteTo) {
-                final List<File> current = pair.first();
+            for (Pair<List<T>, File> pair : toWriteTo) {
+                final List<T> current = pair.first();
                 final File parent = pair.second();
                 parent.mkdirs();
                 final File leftFolder = new File(parent, val + "l/");
                 final File rightFolder = new File(parent, val + "r/");
                 leftFolder.mkdirs();
                 rightFolder.mkdirs();
-                final List<File> leftList = current.subList(0, Math.min(current.size(), half));
-                final List<File> rightList = current.subList(Math.min(current.size(), half), (int) Math.min(current.size(), val));
-                for (File file : leftList) {
-                    Files.copy(file.toPath(), leftFolder.toPath().resolve(file.getName()));
+                final List<T> leftList = current.subList(0, Math.min(current.size(), half));
+                final List<T> rightList = current.subList(Math.min(current.size(), half), (int) Math.min(current.size(), val));
+                for (T file : leftList) {
+                    saver.accept(leftFolder, file);
                 }
-                for (File file : rightList) {
-                    Files.copy(file.toPath(), rightFolder.toPath().resolve(file.getName()));
+                for (T file : rightList) {
+                    saver.accept(rightFolder, file);
                 }
                 toAdd.add(Pair.of(leftList, leftFolder));
                 toAdd.add(Pair.of(rightList, rightFolder));

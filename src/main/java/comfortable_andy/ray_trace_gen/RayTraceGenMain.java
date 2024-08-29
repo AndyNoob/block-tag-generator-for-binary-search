@@ -7,18 +7,22 @@ import comfortable_andy.ray_trace_gen.accessors.*;
 import me.kcra.takenaka.accessor.platform.MapperPlatform;
 import me.kcra.takenaka.accessor.platform.MapperPlatforms;
 import org.apache.commons.cli.*;
+import org.jetbrains.annotations.NotNull;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 
 import java.io.*;
+import java.lang.invoke.*;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public final class RayTraceGenMain {
@@ -30,7 +34,7 @@ public final class RayTraceGenMain {
             .create();
 
     @SuppressWarnings("ResultOfMethodCallIgnored")
-    public static void main(String[] args) throws ParseException, ReflectiveOperationException, IOException, InterruptedException {
+    public static void main(String[] args) throws Throwable {
         Option minecraftVer = Option.builder("v")
                 .longOpt("version")
                 .desc("Minecraft client jar version")
@@ -59,7 +63,7 @@ public final class RayTraceGenMain {
         }
     }
 
-    private static void runServer(VersionManifest manifest, String minecraftVersion) throws IOException, ReflectiveOperationException, InterruptedException {
+    private static void runServer(VersionManifest manifest, String minecraftVersion) throws Throwable {
         VersionManifest.Version version = manifest.getVersion(minecraftVersion);
         VersionData data = GSON.fromJson(Jsoup.connect(version.url()).ignoreContentType(true).get().body().text(), VersionData.class);
 
@@ -72,7 +76,7 @@ public final class RayTraceGenMain {
         System.out.println("Done: " + url);
 
         final List<File> delete = new ArrayList<>();
-        try (URLClassLoader loader = new URLClassLoader(new URL[]{url})) {
+        try (URLClassLoader loader = new URLClassLoader(new URL[]{url}, RayTraceGenMain.class.getClassLoader())) {
             try (WatchService service = FileSystems.getDefault().newWatchService()) {
                 File eula = new File("eula.txt");
                 try (FileWriter writer = new FileWriter(eula)) {
@@ -86,11 +90,13 @@ public final class RayTraceGenMain {
                 MapperPlatforms.setCurrentPlatform(
                         MapperPlatform.create(
                                 minecraftVersion,
-                                loader,
+                                // minecraft uses the parent of the current class loader
+                                loader.getParent(),
                                 "source"
                         )
                 );
-                loader.loadClass("net.minecraft.bundler.Main").getDeclaredMethod("main", String[].class).invoke(null, (Object) new String[]{"nogui"});
+
+                bootServer(loader);
 
                 WatchKey key;
                 while ((key = service.poll(5, TimeUnit.SECONDS)) != null) {
@@ -159,8 +165,8 @@ public final class RayTraceGenMain {
                 final PrintStream newOut = new PrintStream(outputStream);
                 System.setOut(newOut);
                 do {
-                    out.println("Waiting 5 seconds for new logs...");
-                    Thread.sleep(5000);
+                    out.println("Waiting 2 seconds for new logs...");
+                    Thread.sleep(2000);
                 } while (!outputStream.toString().isEmpty());
                 outputStream.close();
                 newOut.close();
@@ -179,6 +185,73 @@ public final class RayTraceGenMain {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static void bootServer(URLClassLoader loader) throws Throwable {
+        final Object main = loader.loadClass("net.minecraft.bundler.Main").getConstructor().newInstance();
+
+        Class<?> resourceParser = Arrays.stream(main.getClass().getDeclaredClasses()).filter(c -> c.getSimpleName().equals("ResourceParser")).findFirst().orElse(null);
+        Method readResource = main.getClass().getDeclaredMethod("readResource", String.class, resourceParser);
+        readResource.trySetAccessible();
+        MethodType methodType = MethodType.methodType(String.class, BufferedReader.class);
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+
+        System.out.println(Arrays.toString(readResource.getParameters()));
+        String defaultMainClassName = (String) readResource.invoke(main, "main-class", LambdaMetafactory.metafactory(
+                lookup,
+                "parse",
+                MethodType.methodType(resourceParser, RayTraceGenMain.class),
+                methodType,
+                lookup.findStatic(RayTraceGenMain.class, "read", MethodType.methodType(String.class, BufferedReader.class)),
+                methodType
+        ).getTarget().invokeExact((Object) null));
+        String mainClassName = System.getProperty("bundlerMainClass", defaultMainClassName);
+        String repoDir = System.getProperty("bundlerRepoDir", "");
+        Path outputDir = Paths.get(repoDir);
+        Files.createDirectories(outputDir);
+        List<URL> extractedUrls = new ArrayList<>();
+        Method readAndExtractDir = main.getClass().getDeclaredMethod("readAndExtractDir", String.class, Path.class, List.class);
+        readAndExtractDir.trySetAccessible();
+        readAndExtractDir.invoke(mainClassName, "versions", outputDir, extractedUrls);
+        readAndExtractDir.invoke(mainClassName, "libraries", outputDir, extractedUrls);
+        if (mainClassName == null || mainClassName.isEmpty()) {
+            System.out.println("Empty main class specified, exiting");
+            System.exit(0);
+        }
+        System.out.println("Starting " + mainClassName);
+        final Thread runThread = makeThread(loader, mainClassName);
+        runThread.start();
+    }
+
+    @NotNull
+    private static String read(BufferedReader reader) {
+        try {
+            return reader.readLine();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @NotNull
+    private static Thread makeThread(URLClassLoader loader, String mainClassName) {
+        final Thread runThread = new Thread(() -> {
+            try {
+                Class<?> mainClass = Class.forName(mainClassName, true, loader);
+                MethodHandle mainHandle = MethodHandles
+                        .lookup()
+                        .findStatic(
+                                mainClass,
+                                "main",
+                                MethodType.methodType(Void.TYPE, String[].class)
+                        ).asFixedArity();
+                mainHandle.invoke((Object[]) new String[]{"nogui"});
+            } catch (Throwable t) {
+                throw new RuntimeException(t);
+            }
+
+        }, "ServerMain");
+        runThread.setContextClassLoader(loader);
+        return runThread;
     }
 
     @SuppressWarnings("ResultOfMethodCallIgnored")

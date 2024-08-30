@@ -22,7 +22,6 @@ import java.util.*;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public final class RayTraceGenMain {
@@ -33,7 +32,6 @@ public final class RayTraceGenMain {
             .disableHtmlEscaping()
             .create();
 
-    @SuppressWarnings("ResultOfMethodCallIgnored")
     public static void main(String[] args) throws Throwable {
         Option minecraftVer = Option.builder("v")
                 .longOpt("version")
@@ -87,16 +85,16 @@ public final class RayTraceGenMain {
                 try (FileWriter writer = new FileWriter(new File(folder.toFile(), "eula.txt"))) {
                     writer.write("eula=true\n");
                 }
+
+                final URLClassLoader minecraftLoader = bootServer(loader);
+
                 MapperPlatforms.setCurrentPlatform(
                         MapperPlatform.create(
                                 minecraftVersion,
-                                // minecraft uses the parent of the current class loader
-                                loader.getParent(),
+                                minecraftLoader,
                                 "source"
                         )
                 );
-
-                bootServer(loader);
 
                 WatchKey key;
                 while ((key = service.poll(5, TimeUnit.SECONDS)) != null) {
@@ -112,7 +110,6 @@ public final class RayTraceGenMain {
                 int fullCounter = 0;
                 int nonFullCounter = 0;
 
-                System.out.println(BuiltInRegistriesAccessor.TYPE.get());
                 Object blockRegistry = BuiltInRegistriesAccessor.FIELD_BLOCK.get();
 
                 if (blockRegistry == null) {
@@ -187,24 +184,18 @@ public final class RayTraceGenMain {
         }
     }
 
-    private static void bootServer(URLClassLoader loader) throws Throwable {
+    private static URLClassLoader bootServer(URLClassLoader loader) throws Throwable {
         final Object main = loader.loadClass("net.minecraft.bundler.Main").getConstructor().newInstance();
 
-        Class<?> resourceParser = Arrays.stream(main.getClass().getDeclaredClasses()).filter(c -> c.getSimpleName().equals("ResourceParser")).findFirst().orElse(null);
-        Method readResource = main.getClass().getDeclaredMethod("readResource", String.class, resourceParser);
-        readResource.trySetAccessible();
-        MethodType methodType = MethodType.methodType(String.class, BufferedReader.class);
-        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        String defaultMainClassName;
 
-        System.out.println(Arrays.toString(readResource.getParameters()));
-        String defaultMainClassName = (String) readResource.invoke(main, "main-class", LambdaMetafactory.metafactory(
-                lookup,
-                "parse",
-                MethodType.methodType(resourceParser, RayTraceGenMain.class),
-                methodType,
-                lookup.findStatic(RayTraceGenMain.class, "read", MethodType.methodType(String.class, BufferedReader.class)),
-                methodType
-        ).getTarget().invokeExact((Object) null));
+        try (InputStream stream = main.getClass().getResourceAsStream("/META-INF/main-class")) {
+            assert stream != null;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream))) {
+                defaultMainClassName = reader.readLine().trim();
+            }
+        }
+
         String mainClassName = System.getProperty("bundlerMainClass", defaultMainClassName);
         String repoDir = System.getProperty("bundlerRepoDir", "");
         Path outputDir = Paths.get(repoDir);
@@ -212,31 +203,24 @@ public final class RayTraceGenMain {
         List<URL> extractedUrls = new ArrayList<>();
         Method readAndExtractDir = main.getClass().getDeclaredMethod("readAndExtractDir", String.class, Path.class, List.class);
         readAndExtractDir.trySetAccessible();
-        readAndExtractDir.invoke(mainClassName, "versions", outputDir, extractedUrls);
-        readAndExtractDir.invoke(mainClassName, "libraries", outputDir, extractedUrls);
+        readAndExtractDir.invoke(main, "versions", outputDir, extractedUrls);
+        readAndExtractDir.invoke(main, "libraries", outputDir, extractedUrls);
         if (mainClassName == null || mainClassName.isEmpty()) {
             System.out.println("Empty main class specified, exiting");
             System.exit(0);
         }
         System.out.println("Starting " + mainClassName);
-        final Thread runThread = makeThread(loader, mainClassName);
-        runThread.start();
+        final Pair<Thread, URLClassLoader> pair = makeThread(loader, mainClassName, extractedUrls);
+        pair.first().start();
+        return pair.second();
     }
 
     @NotNull
-    private static String read(BufferedReader reader) {
-        try {
-            return reader.readLine();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @NotNull
-    private static Thread makeThread(URLClassLoader loader, String mainClassName) {
+    private static Pair<Thread, URLClassLoader> makeThread(URLClassLoader loader, String mainClassName, List<URL> extractedUrls) {
+        final URLClassLoader minecraftLoader = new URLClassLoader(extractedUrls.toArray(URL[]::new), loader);
         final Thread runThread = new Thread(() -> {
             try {
-                Class<?> mainClass = Class.forName(mainClassName, true, loader);
+                Class<?> mainClass = Class.forName(mainClassName, true, minecraftLoader);
                 MethodHandle mainHandle = MethodHandles
                         .lookup()
                         .findStatic(
@@ -250,8 +234,8 @@ public final class RayTraceGenMain {
             }
 
         }, "ServerMain");
-        runThread.setContextClassLoader(loader);
-        return runThread;
+        runThread.setContextClassLoader(minecraftLoader);
+        return Pair.of(runThread, minecraftLoader);
     }
 
     @SuppressWarnings("ResultOfMethodCallIgnored")

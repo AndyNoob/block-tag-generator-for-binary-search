@@ -16,7 +16,6 @@ import java.lang.invoke.*;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.List;
@@ -138,46 +137,9 @@ public final class RayTraceGenMain {
                 }
                 System.out.println("Found " + fullCounter + " full blocks");
                 System.out.println("Found " + nonFullCounter + " non full blocks");
+                System.out.println("Stop the server when you're ready");
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
-            } finally {
-                System.out.println("Closing server...");
-                ByteArrayInputStream inputStream =
-                        new ByteArrayInputStream("/stop\r".getBytes(StandardCharsets.UTF_8));
-                InputStream in = System.in;
-
-                // finally executes after closing
-                //noinspection TryFinallyCanBeTryWithResources
-                try {
-                    System.out.println("Hijacking input stream...");
-                    System.setIn(inputStream);
-                } finally {
-                    System.setIn(in);
-                    System.out.println("Done.");
-                    inputStream.close();
-                }
-
-                PrintStream out = System.out;
-                final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                final PrintStream newOut = new PrintStream(outputStream);
-                System.setOut(newOut);
-                do {
-                    out.println("Waiting 2 seconds for new logs...");
-                    Thread.sleep(2000);
-                } while (!outputStream.toString().isEmpty());
-                outputStream.close();
-                newOut.close();
-                System.setOut(out);
-
-                System.out.println("Server (should be) down.");
-                System.out.println("Doing cleanups...");
-                for (File file : delete) {
-                    System.out.println("Deleting " + file.toPath());
-                    if (file.isDirectory()) {
-                        Files.walk(file.toPath()).forEach(p -> p.toFile().delete());
-                        file.delete();
-                    } else file.delete();
-                }
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -232,7 +194,6 @@ public final class RayTraceGenMain {
             } catch (Throwable t) {
                 throw new RuntimeException(t);
             }
-
         }, "ServerMain");
         runThread.setContextClassLoader(minecraftLoader);
         return Pair.of(runThread, minecraftLoader);

@@ -59,6 +59,20 @@ accessors {
     mapClass("net.minecraft.core.registries.BuiltInRegistries") {
         field("net.minecraft.core.DefaultedRegistry", "BLOCK")
     }
+    mapClass("net.minecraft.core.Registry") {
+        method("net.minecraft.resources.ResourceLocation", "getKey", "java.lang.Object")
+        method("java.lang.Iterable", "getTagOrEmpty", "net.minecraft.tags.TagKey")
+    }
+    mapClass("net.minecraft.tags.BlockTags")
+    mapClass("net.minecraft.tags.TagKey") {
+        method("net.minecraft.resources.ResourceLocation", "location")
+    }
+    mapClass("net.minecraft.core.Holder") {
+        method("java.lang.Object", "value")
+    }
+    mapClass("net.minecraft.resources.ResourceLocation") {
+        method("java.lang.String", "getPath")
+    }
 }
 
 jar {

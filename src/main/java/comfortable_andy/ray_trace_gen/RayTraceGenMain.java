@@ -161,6 +161,19 @@ public final class RayTraceGenMain {
                 }
                 System.out.println("Found " + fullCounter + " full blocks");
                 System.out.println("Found " + nonFullCounter + " non full blocks");
+                final File root = Paths.get("tags").toFile();
+                for (Map.Entry<Object, List<String>> entry : blockTags.entrySet()) {
+                    final Object tag = entry.getKey();
+                    final File savingTo = new File(root, ResourceLocationAccessor.METHOD_GET_PATH.get().invoke(TagKeyAccessor.METHOD_LOCATION.get().invoke(tag)) + ".json");
+                    if (savingTo.exists()) {
+                        savingTo.delete();
+                        savingTo.createNewFile();
+                    }
+                    savingTo.getParentFile().mkdirs();
+                    try (FileWriter writer = new FileWriter(savingTo)) {
+                        writer.write(GSON.toJson(new BlockTag(entry.getValue())));
+                    }
+                }
                 System.out.println("Stop the server when you're ready");
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);

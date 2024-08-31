@@ -163,6 +163,7 @@ public final class RayTraceGenMain {
                 System.out.println("Found " + nonFullCounter + " non full blocks");
                 final File root = Paths.get("tags").toFile();
                 for (Map.Entry<Object, List<String>> entry : blockTags.entrySet()) {
+                    if (entry.getValue().isEmpty()) continue;
                     final Object tag = entry.getKey();
                     final File savingTo = new File(root, ResourceLocationAccessor.METHOD_GET_PATH.get().invoke(TagKeyAccessor.METHOD_LOCATION.get().invoke(tag)) + ".json");
                     if (savingTo.exists()) {

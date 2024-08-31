@@ -13,6 +13,7 @@ import org.jsoup.Jsoup;
 
 import java.io.*;
 import java.lang.invoke.*;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 public final class RayTraceGenMain {
 
@@ -60,6 +62,7 @@ public final class RayTraceGenMain {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private static void runServer(VersionManifest manifest, String minecraftVersion) throws Throwable {
         VersionManifest.Version version = manifest.getVersion(minecraftVersion);
         VersionData data = GSON.fromJson(Jsoup.connect(version.url()).ignoreContentType(true).get().body().text(), VersionData.class);
@@ -116,6 +119,12 @@ public final class RayTraceGenMain {
                     return;
                 }
 
+                final Map<Object, List<String>> blockTags =new HashMap<>();
+
+                for (Field field : BlockTagsAccessor.TYPE.get().getDeclaredFields()) {
+                    blockTags.put(field.get(null), new ArrayList<>());
+                }
+
                 for (Object o : ((Iterable<?>) blockRegistry)) {
                     Class<?> blockClass = BlockAccessor.TYPE.get();
                     if (!blockClass.isAssignableFrom(o.getClass()))
@@ -133,7 +142,22 @@ public final class RayTraceGenMain {
                             emptyCollisionContext
                     );
                     if ((boolean) BlockAccessor.METHOD_IS_SHAPE_FULL_BLOCK.get().invoke(null, shape)) fullCounter++;
-                    else nonFullCounter++;
+                    else {
+                        nonFullCounter++;
+                        for (Map.Entry<Object, List<String>> entry : blockTags.entrySet()) {
+                            final Object tag = entry.getKey();
+                            final Iterable<Object> blocks = (Iterable<Object>) RegistryAccessor.METHOD_GET_TAG_OR_EMPTY.get().invoke(blockRegistry, tag);
+                            if (StreamSupport.stream(blocks.spliterator(), false).anyMatch(c -> {
+                                try {
+                                    return HolderAccessor.METHOD_VALUE.get().invoke(c).equals(o);
+                                } catch (ReflectiveOperationException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            })) {
+                                entry.getValue().add(RegistryAccessor.METHOD_GET_KEY.get().invoke(blockRegistry, o).toString());
+                            }
+                        }
+                    }
                 }
                 System.out.println("Found " + fullCounter + " full blocks");
                 System.out.println("Found " + nonFullCounter + " non full blocks");
